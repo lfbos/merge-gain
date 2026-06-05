@@ -2,6 +2,13 @@
 cache/
 out/
 
+# Coverage
+coverage/
+lcov.info
+
+# Gas snapshot
+.gas-snapshot
+
 # Commonly ignored directories
 .logs/
 .ignore/

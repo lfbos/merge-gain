@@ -23,6 +23,7 @@ contract MergeGain {
 
     // Events
     event BountyCreated(uint256 indexed bountyId, address indexed owner, uint256 amount, string description);
+    event WorkSubmitted(uint256 indexed bountyId, address indexed contributor, bytes32 proofHash);
 
     // Modifiers
 
@@ -40,5 +41,19 @@ contract MergeGain {
         });
         emit BountyCreated(bountyCount, msg.sender, msg.value, _description);
         bountyCount++;
+    }
+
+    function submitWork(uint256 _bountyId, bytes32 _proofHash) external {
+        require(_bountyId < bountyCount, "Bounty does not exist");
+
+        Bounty storage bounty = bounties[_bountyId];
+        require(bounty.status == BountyStatus.Open, "Bounty is not open");
+        require(bounty.owner != msg.sender, "Owner cannot submit work");
+
+        bounty.contributor = msg.sender;
+        bounty.proofHash = _proofHash;
+        bounty.status = BountyStatus.PendingReview;
+
+        emit WorkSubmitted(_bountyId, msg.sender, _proofHash);
     }
 }
