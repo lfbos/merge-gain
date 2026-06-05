@@ -4,6 +4,23 @@ pragma solidity ^0.8.13;
 import {Test} from "forge-std/Test.sol";
 import {MergeGain} from "../src/MergeGain.sol";
 
+// Contract that rejects all incoming ETH transfers.
+// Used to force the .call() in approveWork/cancelBounty to fail.
+contract RejectingReceiver {
+    function createBountyOn(MergeGain target, string memory desc) external payable {
+        target.createBounty{value: msg.value}(desc);
+    }
+
+    function submitWorkOn(MergeGain target, uint256 id, bytes32 proofHash) external {
+        target.submitWork(id, proofHash);
+    }
+
+    function cancelBountyOn(MergeGain target, uint256 id) external {
+        target.cancelBounty(id);
+    }
+    // No receive() or fallback() → any incoming ETH reverts
+}
+
 contract MergeGainTest is Test {
     MergeGain public mergeGain;
 
@@ -250,5 +267,81 @@ contract MergeGainTest is Test {
         // Verify ETH was actually refunded
         assertEq(address(this).balance, ownerBalanceBefore + 1 ether);
         assertEq(address(mergeGain).balance, 0);
+    }
+
+    // Modifier branch coverage: bountyExists + onlyBountyOwner
+
+    function testApproveWorkOnNonExistentBounty() public {
+        vm.expectRevert("Bounty does not exist");
+        mergeGain.approveWork(999);
+    }
+
+    function testRejectWorkOnNonExistentBounty() public {
+        vm.expectRevert("Bounty does not exist");
+        mergeGain.rejectWork(999);
+    }
+
+    function testCancelBountyOnNonExistentBounty() public {
+        vm.expectRevert("Bounty does not exist");
+        mergeGain.cancelBounty(999);
+    }
+
+    function testRejectWorkByNonOwner() public {
+        _createBounty(1 ether, "Test bounty");
+
+        vm.prank(ALICE);
+        mergeGain.submitWork(0, keccak256("Proof of work"));
+
+        // BOB (not the owner) tries to reject — should revert
+        vm.prank(BOB);
+        vm.expectRevert("Only bounty owner can perform this action");
+        mergeGain.rejectWork(0);
+    }
+
+    function testCancelBountyByNonOwner() public {
+        _createBounty(1 ether, "Test bounty");
+
+        // BOB (not the owner) tries to cancel — should revert
+        vm.prank(BOB);
+        vm.expectRevert("Only bounty owner can perform this action");
+        mergeGain.cancelBounty(0);
+    }
+
+    function testCancelBountyThatIsNotOpen() public {
+        _createBounty(1 ether, "Test bounty");
+
+        // ALICE submits — bounty status becomes PendingReview (no longer Open)
+        vm.prank(ALICE);
+        mergeGain.submitWork(0, keccak256("Proof of work"));
+
+        // Owner tries to cancel — should revert because bounty is not Open
+        vm.expectRevert("Bounty cannot be cancelled");
+        mergeGain.cancelBounty(0);
+    }
+
+    // Failed ETH transfer branches (using RejectingReceiver)
+
+    function testCancelBountyRevertsIfRefundFails() public {
+        RejectingReceiver rejector = new RejectingReceiver();
+        vm.deal(address(rejector), 1 ether);
+
+        // rejector creates the bounty, so it is also the owner
+        rejector.createBountyOn{value: 1 ether}(mergeGain, "Test");
+
+        // rejector tries to cancel; the refund call will hit its missing receive() → revert
+        vm.expectRevert("Refund failed");
+        rejector.cancelBountyOn(mergeGain, 0);
+    }
+
+    function testApproveWorkRevertsIfTransferFails() public {
+        RejectingReceiver rejector = new RejectingReceiver();
+        _createBounty(1 ether, "Test bounty");
+
+        // rejector submits work as the contributor
+        rejector.submitWorkOn(mergeGain, 0, keccak256("Proof of work"));
+
+        // Owner approves; transfer to rejector fails because it has no receive()
+        vm.expectRevert("Transfer failed");
+        mergeGain.approveWork(0);
     }
 }
