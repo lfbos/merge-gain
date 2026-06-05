@@ -44,7 +44,11 @@ coverage-html: lcov.info
 	@command -v genhtml >/dev/null 2>&1 || { \
 		echo "Error: 'genhtml' no encontrado. Instálalo con: brew install lcov"; exit 1; \
 	}
-	genhtml lcov.info --output-directory coverage --branch-coverage --quiet
+	genhtml lcov.info \
+		--output-directory coverage \
+		--branch-coverage \
+		--ignore-errors inconsistent,corrupt \
+		--quiet
 	@echo "Reporte generado en ./coverage/index.html"
 
 lcov.info:
