@@ -22,10 +22,25 @@ contract MergeGain {
     uint256 public bountyCount;
 
     // Events
+    // Bounty Events
     event BountyCreated(uint256 indexed bountyId, address indexed owner, uint256 amount, string description);
+    event BountyApproved(uint256 indexed bountyId, address indexed contributor, uint256 amount);
+    event BountyCancelled(uint256 indexed bountyId, address indexed owner);
+
+    // Work Events
     event WorkSubmitted(uint256 indexed bountyId, address indexed contributor, bytes32 proofHash);
+    event WorkRejected(uint256 indexed bountyId, address indexed contributor);
 
     // Modifiers
+    modifier bountyExists(uint256 _bountyId) {
+        require(_bountyId < bountyCount, "Bounty does not exist");
+        _;
+    }
+
+    modifier onlyBountyOwner(uint256 _bountyId) {
+        require(bounties[_bountyId].owner == msg.sender, "Only bounty owner can perform this action");
+        _;
+    }
 
     // Functions
 
@@ -43,9 +58,7 @@ contract MergeGain {
         bountyCount++;
     }
 
-    function submitWork(uint256 _bountyId, bytes32 _proofHash) external {
-        require(_bountyId < bountyCount, "Bounty does not exist");
-
+    function submitWork(uint256 _bountyId, bytes32 _proofHash) external bountyExists(_bountyId) {
         Bounty storage bounty = bounties[_bountyId];
         require(bounty.status == BountyStatus.Open, "Bounty is not open");
         require(bounty.owner != msg.sender, "Owner cannot submit work");
@@ -55,5 +68,50 @@ contract MergeGain {
         bounty.status = BountyStatus.PendingReview;
 
         emit WorkSubmitted(_bountyId, msg.sender, _proofHash);
+    }
+
+    function approveWork(uint256 _bountyId) external bountyExists(_bountyId) onlyBountyOwner(_bountyId) {
+        Bounty storage bounty = bounties[_bountyId];
+        require(bounty.status == BountyStatus.PendingReview, "Bounty is not pending review");
+
+        // 1. Update state
+        bounty.status = BountyStatus.Completed;
+
+        // 2. Transfer funds to contributor
+        (bool success,) = bounty.contributor.call{value: bounty.amount}("");
+        require(success, "Transfer failed");
+
+        // 3. Emit event
+        emit BountyApproved(_bountyId, bounty.contributor, bounty.amount);
+    }
+
+    function rejectWork(uint256 _bountyId) external bountyExists(_bountyId) onlyBountyOwner(_bountyId) {
+        Bounty storage bounty = bounties[_bountyId];
+        require(bounty.status == BountyStatus.PendingReview, "Bounty is not pending review");
+
+        address rejectedContributor = bounty.contributor;
+
+        // Reset contributor and proof hash
+        bounty.contributor = address(0);
+        bounty.proofHash = bytes32(0);
+        bounty.status = BountyStatus.Open;
+
+        // Emit event
+        emit WorkRejected(_bountyId, rejectedContributor);
+    }
+
+    function cancelBounty(uint256 _bountyId) external bountyExists(_bountyId) onlyBountyOwner(_bountyId) {
+        Bounty storage bounty = bounties[_bountyId];
+        require(bounty.status == BountyStatus.Open, "Bounty cannot be cancelled");
+
+        // 1. Update status
+        bounty.status = BountyStatus.Cancelled;
+
+        // 2. Refund the owner
+        (bool success,) = bounty.owner.call{value: bounty.amount}("");
+        require(success, "Refund failed");
+
+        // 3. Emit event
+        emit BountyCancelled(_bountyId, msg.sender);
     }
 }
