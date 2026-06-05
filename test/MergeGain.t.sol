@@ -15,6 +15,9 @@ contract MergeGainTest is Test {
         mergeGain = new MergeGain();
     }
 
+    // Allow this contract to receive ETH refunds (e.g. from cancelBounty)
+    receive() external payable {}
+
     // helpers
 
     function _createBounty(uint256 amount, string memory desc) internal returns (uint256 id) {
@@ -133,5 +136,119 @@ contract MergeGainTest is Test {
         // without prank, msg.sender in submitWork is also address(this) → revert.
         vm.expectRevert("Owner cannot submit work");
         mergeGain.submitWork(0, keccak256("Owner's proof"));
+    }
+
+    function testApproveWork() public {
+        _createBounty(1 ether, "Test bounty");
+
+        // ALICE submits work
+        vm.prank(ALICE);
+        mergeGain.submitWork(0, keccak256("Proof of work"));
+
+        // Owner (address(this)) approves ALICE's submission
+        vm.expectEmit(true, true, false, true, address(mergeGain));
+        emit MergeGain.BountyApproved(0, ALICE, 1 ether);
+
+        mergeGain.approveWork(0);
+
+        (
+            ,
+            ,
+            ,
+            MergeGain.BountyStatus status,
+            address contributor,
+            bytes32 proofHash
+        ) = mergeGain.bounties(0);
+
+        assertEq(uint256(status), uint256(MergeGain.BountyStatus.Completed));
+        assertEq(contributor, ALICE);
+        assertEq(proofHash, keccak256("Proof of work"));
+    }
+
+    function testApproveWorkByNonOwner() public {
+        _createBounty(1 ether, "Test bounty");
+
+        // ALICE submits work
+        vm.prank(ALICE);
+        mergeGain.submitWork(0, keccak256("Proof of work"));
+
+        // BOB tries to approve ALICE's submission — should revert
+        vm.prank(BOB);
+        vm.expectRevert("Only bounty owner can perform this action");
+        mergeGain.approveWork(0);
+    }
+
+    function testApproveWorkThatIsNotPending() public {
+        _createBounty(1 ether, "Test bounty");
+
+        // Owner tries to approve work before any submission — should revert
+        vm.expectRevert("Bounty is not pending review");
+        mergeGain.approveWork(0);
+    }
+
+    function testRejectWork() public {
+        _createBounty(1 ether, "Test bounty");
+
+        // ALICE submits work
+        vm.prank(ALICE);
+        mergeGain.submitWork(0, keccak256("Proof of work"));
+
+        // Owner (address(this)) rejects ALICE's submission
+        vm.expectEmit(true, true, false, true, address(mergeGain));
+        emit MergeGain.WorkRejected(0, ALICE);
+
+        mergeGain.rejectWork(0);
+        (
+            ,
+            ,
+            ,
+            MergeGain.BountyStatus status,
+            address contributor,
+            bytes32 proofHash
+        ) = mergeGain.bounties(0);
+
+        assertEq(uint256(status), uint256(MergeGain.BountyStatus.Open));
+        assertEq(contributor, address(0));
+        assertEq(proofHash, bytes32(0));
+    }
+
+    function testRejectWorkThatIsNotPending() public {
+        _createBounty(1 ether, "Test bounty");
+
+        // Owner tries to reject work before any submission — should revert
+        vm.expectRevert("Bounty is not pending review");
+        mergeGain.rejectWork(0);
+    }
+
+    function testCancelBounty() public {
+        _createBounty(1 ether, "Test bounty");
+
+        uint256 ownerBalanceBefore = address(this).balance;
+
+        // Owner cancels the bounty
+        vm.expectEmit(true, true, false, true, address(mergeGain));
+        emit MergeGain.BountyCancelled(0, address(this));
+
+        mergeGain.cancelBounty(0);
+
+        (
+            address owner,
+            uint256 bountyAmount,
+            string memory bountyDescription,
+            MergeGain.BountyStatus status,
+            address contributor,
+            bytes32 proofHash
+        ) = mergeGain.bounties(0);
+
+        assertEq(owner, address(this));
+        assertEq(bountyAmount, 0); // Amount zeroed after refund
+        assertEq(bountyDescription, "Test bounty");
+        assertEq(uint256(status), uint256(MergeGain.BountyStatus.Cancelled));
+        assertEq(contributor, address(0));
+        assertEq(proofHash, bytes32(0));
+
+        // Verify ETH was actually refunded
+        assertEq(address(this).balance, ownerBalanceBefore + 1 ether);
+        assertEq(address(mergeGain).balance, 0);
     }
 }

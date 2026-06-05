@@ -104,11 +104,13 @@ contract MergeGain {
         Bounty storage bounty = bounties[_bountyId];
         require(bounty.status == BountyStatus.Open, "Bounty cannot be cancelled");
 
-        // 1. Update status
+        // 1. Update state
+        uint256 refundAmount = bounty.amount;
         bounty.status = BountyStatus.Cancelled;
+        bounty.amount = 0;
 
         // 2. Refund the owner
-        (bool success,) = bounty.owner.call{value: bounty.amount}("");
+        (bool success,) = bounty.owner.call{value: refundAmount}("");
         require(success, "Refund failed");
 
         // 3. Emit event
