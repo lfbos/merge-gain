@@ -7,9 +7,22 @@ import {MergeGain} from "../src/MergeGain.sol";
 contract MergeGainTest is Test {
     MergeGain public mergeGain;
 
+    address constant ALICE = address(0xA11CE);
+    address constant BOB = address(0xB0B);
+    address constant CAROL = address(0xCA801);
+
     function setUp() public {
         mergeGain = new MergeGain();
     }
+
+    // helpers
+
+    function _createBounty(uint256 amount, string memory desc) internal returns (uint256 id) {
+        id = mergeGain.bountyCount();
+        mergeGain.createBounty{value: amount}(desc);
+    }
+
+    // createBounty
 
     function testCreateBounty() public {
         string memory description = "Fix bug in smart contract";
@@ -18,7 +31,7 @@ contract MergeGainTest is Test {
         vm.expectEmit(true, true, false, true, address(mergeGain));
         emit MergeGain.BountyCreated(0, address(this), amount, description);
 
-        mergeGain.createBounty{value: amount}(description);
+        _createBounty(amount, description);
 
         (
             address owner,
@@ -39,25 +52,41 @@ contract MergeGainTest is Test {
     }
 
     function testCreateBountyWithZeroAmount() public {
-        string memory description = "This should fail";
-
         vm.expectRevert("Bounty amount must be greater than zero");
-        mergeGain.createBounty{value: 0}(description);
+        mergeGain.createBounty{value: 0}("This should fail");
     }
 
+    function testCreateBountyIncreasesContractBalance() public {
+        uint256 amount = 2 ether;
+        _createBounty(amount, "Increase balance");
+
+        assertEq(address(mergeGain).balance, amount);
+    }
+
+    function testMultipleBountiesIncrementIds() public {
+        uint256 id0 = _createBounty(1 ether, "First");
+        uint256 id1 = _createBounty(0.5 ether, "Second");
+        uint256 id2 = _createBounty(0.25 ether, "Third");
+
+        assertEq(id0, 0);
+        assertEq(id1, 1);
+        assertEq(id2, 2);
+        assertEq(mergeGain.bountyCount(), 3);
+        assertEq(address(mergeGain).balance, 1.75 ether);
+    }
+
+    // submitWork
+
     function testSubmitWork() public {
-        // Create a bounty first
         string memory description = "Implement feature X";
         uint256 amount = 1 ether;
-        mergeGain.createBounty{value: amount}(description);
+        _createBounty(amount, description);
 
-        // Simulate a contributor submitting work
-        address contributor = address(0x123);
         bytes32 proofHash = keccak256("Proof of work");
 
-        vm.startPrank(contributor);
+        vm.startPrank(ALICE);
         vm.expectEmit(true, true, false, true, address(mergeGain));
-        emit MergeGain.WorkSubmitted(0, contributor, proofHash);
+        emit MergeGain.WorkSubmitted(0, ALICE, proofHash);
 
         mergeGain.submitWork(0, proofHash);
         vm.stopPrank();
@@ -75,42 +104,34 @@ contract MergeGainTest is Test {
         assertEq(bountyAmount, amount);
         assertEq(bountyDescription, description);
         assertEq(uint256(status), uint256(MergeGain.BountyStatus.PendingReview));
-        assertEq(actualContributor, contributor);
+        assertEq(actualContributor, ALICE);
         assertEq(actualProofHash, proofHash);
     }
 
     function testSubmitWorkToNonExistentBounty() public {
-        bytes32 proofHash = keccak256("Proof of work");
-
         vm.expectRevert("Bounty does not exist");
-        mergeGain.submitWork(999, proofHash);
+        mergeGain.submitWork(999, keccak256("Proof of work"));
     }
 
     function testSubmitWorkToClosedBounty() public {
-        string memory description = "Test bounty";
-        uint256 amount = 1 ether;
-        mergeGain.createBounty{value: amount}(description);
+        _createBounty(1 ether, "Test bounty");
 
-        // First contributor submits — bounty status pasa a PendingReview (ya no Open)
-        address firstContributor = address(0xBEEF);
-        vm.prank(firstContributor);
+        // ALICE submits — bounty transitions to PendingReview (no longer Open)
+        vm.prank(ALICE);
         mergeGain.submitWork(0, keccak256("First proof"));
 
-        // Second contributor intenta enviar trabajo sobre una bounty que ya no está Open
-        address secondContributor = address(0xCAFE);
-        vm.prank(secondContributor);
+        // BOB tries to submit work on a bounty that is no longer Open
+        vm.prank(BOB);
         vm.expectRevert("Bounty is not open");
         mergeGain.submitWork(0, keccak256("New proof of work"));
     }
 
     function testOwnerCannotSubmitWork() public {
-        string memory description = "Test bounty";
-        uint256 amount = 1 ether;
-        mergeGain.createBounty{value: amount}(description);
+        _createBounty(1 ether, "Test bounty");
 
-        bytes32 proofHash = keccak256("Owner's proof");
-
+        // address(this) is the owner (created the bounty without prank);
+        // without prank, msg.sender in submitWork is also address(this) → revert.
         vm.expectRevert("Owner cannot submit work");
-        mergeGain.submitWork(0, proofHash);
+        mergeGain.submitWork(0, keccak256("Owner's proof"));
     }
 }
