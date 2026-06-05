@@ -168,14 +168,7 @@ contract MergeGainTest is Test {
 
         mergeGain.approveWork(0);
 
-        (
-            ,
-            ,
-            ,
-            MergeGain.BountyStatus status,
-            address contributor,
-            bytes32 proofHash
-        ) = mergeGain.bounties(0);
+        (,,, MergeGain.BountyStatus status, address contributor, bytes32 proofHash) = mergeGain.bounties(0);
 
         assertEq(uint256(status), uint256(MergeGain.BountyStatus.Completed));
         assertEq(contributor, ALICE);
@@ -215,14 +208,7 @@ contract MergeGainTest is Test {
         emit MergeGain.WorkRejected(0, ALICE);
 
         mergeGain.rejectWork(0);
-        (
-            ,
-            ,
-            ,
-            MergeGain.BountyStatus status,
-            address contributor,
-            bytes32 proofHash
-        ) = mergeGain.bounties(0);
+        (,,, MergeGain.BountyStatus status, address contributor, bytes32 proofHash) = mergeGain.bounties(0);
 
         assertEq(uint256(status), uint256(MergeGain.BountyStatus.Open));
         assertEq(contributor, address(0));
